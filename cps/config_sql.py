@@ -115,6 +115,14 @@ class _Settings(_Base):
     config_google_drive_folder = Column(String)
     config_google_drive_watch_changes_response = Column(JSON, default={})
 
+    config_use_s3 = Column(Boolean, default=False)
+    config_s3_endpoint = Column(String)
+    config_s3_region = Column(String)
+    config_s3_bucket = Column(String)
+    config_s3_access_key = Column(String)
+    config_s3_secret_key_e = Column(String)
+    config_s3_secret_key = Column(String)
+
     config_use_goodreads = Column(Boolean, default=False)
     config_goodreads_api_key = Column(String)
     config_googlebooks_api_key = Column(String, default='')
@@ -428,15 +436,19 @@ def _encrypt_fields(session, secret_key):
         with session.bind.connect() as conn:
             conn.execute(text("ALTER TABLE settings ADD column 'mail_password_e' String"))
             conn.execute(text("ALTER TABLE settings ADD column 'config_ldap_serv_password_e' String"))
+            conn.execute(text("ALTER TABLE settings ADD column 'config_s3_secret_key_e' String"))
         session.commit()
         crypter = Fernet(secret_key)
-        settings = session.query(_Settings.mail_password, _Settings.config_ldap_serv_password).first()
+        settings = session.query(_Settings.mail_password, _Settings.config_ldap_serv_password, _Settings.config_s3_secret_key).first()
         if settings.mail_password:
             session.query(_Settings).update(
                 {_Settings.mail_password_e: crypter.encrypt(settings.mail_password.encode())})
         if settings.config_ldap_serv_password:
             session.query(_Settings).update(
                 {_Settings.config_ldap_serv_password_e: crypter.encrypt(settings.config_ldap_serv_password.encode())})
+        if settings.config_s3_secret_key:
+            session.query(_Settings).update(
+                {_Settings.config_s3_secret_key_e: crypter.encrypt(settings.config_s3_secret_key.encode())})
         session.commit()
 
 

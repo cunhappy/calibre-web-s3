@@ -262,6 +262,20 @@ class TaskEmail(CalibreTask):
             with open(datafile, 'rb') as file_:
                 data = file_.read()
             os.remove(datafile)
+        elif config.config_use_s3:
+            from cps import s3utils
+            datafile = os.path.join(calibre_path, book_path, filename)
+            if not os.path.exists(os.path.join(calibre_path, book_path)):
+                os.makedirs(os.path.join(calibre_path, book_path))
+            s3_path = os.path.join(book_path, filename).replace('\\', '/')
+            if not s3utils.download_file(s3_path, datafile):
+                return None
+            if config.config_binariesdir and config.config_embed_metadata:
+                data_path, data_file = do_calibre_export(self.book_id, extension)
+                datafile = os.path.join(data_path, data_file + "." + extension)
+            with open(datafile, 'rb') as file_:
+                data = file_.read()
+            os.remove(datafile)
         else:
             datafile = os.path.join(calibre_path, book_path, filename)
             try:

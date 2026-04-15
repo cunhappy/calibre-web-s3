@@ -180,13 +180,20 @@ class TaskGenerateCoverThumbnails(CalibreTask):
 
     def generate_book_thumbnail(self, book, thumbnail):
         if book and thumbnail:
-            if config.config_use_google_drive:
-                if not gdriveutils.is_gdrive_ready():
+            if config.config_use_google_drive or config.config_use_s3:
+                if config.config_use_google_drive and not gdriveutils.is_gdrive_ready():
                     raise Exception('Google Drive is configured but not ready')
 
-                content = gdriveutils.get_cover_via_gdrive(book.path)
+                if config.config_use_google_drive:
+                    content = gdriveutils.get_cover_via_gdrive(book.path)
+                else:
+                    from cps import s3utils
+                    s3_path = os.path.join(book.path, 'cover.jpg').replace("\\", "/")
+                    stream = s3utils.get_file_stream(s3_path)
+                    content = stream.read() if stream else None
+
                 if not content:
-                    raise Exception('Google Drive cover url not found')
+                    raise Exception('Cover not found')
                 try:
                     stream = BytesIO(content)
                     with Image(file=stream) as img:
@@ -373,17 +380,24 @@ class TaskGenerateSeriesThumbnails(CalibreTask):
         height = 0
         with Image() as canvas:
             for book in books:
-                if config.config_use_google_drive:
-                    if not gdriveutils.is_gdrive_ready():
+                if config.config_use_google_drive or config.config_use_s3:
+                    if config.config_use_google_drive and not gdriveutils.is_gdrive_ready():
                         raise Exception('Google Drive is configured but not ready')
 
-                    web_content_link = gdriveutils.get_cover_via_gdrive(book.path)
-                    if not web_content_link:
-                        raise Exception('Google Drive cover url not found')
+                    if config.config_use_google_drive:
+                        content = gdriveutils.get_cover_via_gdrive(book.path)
+                    else:
+                        from cps import s3utils
+                        s3_path = os.path.join(book.path, 'cover.jpg').replace("\\", "/")
+                        s3_stream = s3utils.get_file_stream(s3_path)
+                        content = s3_stream.read() if s3_stream else None
+
+                    if not content:
+                        raise Exception('Cover not found')
 
                     stream = None
                     try:
-                        stream = urlopen(web_content_link)
+                        stream = BytesIO(content)
                         with Image(file=stream) as img:
                             # Use the first image in this set to determine the width and height to scale the
                             # other images in this set
@@ -408,27 +422,27 @@ class TaskGenerateSeriesThumbnails(CalibreTask):
                     finally:
                         if stream is not None:
                             stream.close()
+                else:
+                    book_cover_filepath = os.path.join(config.get_book_path(), book.path, 'cover.jpg')
+                    if not os.path.isfile(book_cover_filepath):
+                        raise Exception('Book cover file not found')
 
-                book_cover_filepath = os.path.join(config.get_book_path(), book.path, 'cover.jpg')
-                if not os.path.isfile(book_cover_filepath):
-                    raise Exception('Book cover file not found')
+                    with Image(filename=book_cover_filepath) as img:
+                        # Use the first image in this set to determine the width and height to scale the
+                        # other images in this set
+                        if width == 0 or height == 0:
+                            width = get_resize_width(thumbnail.resolution, img.width, img.height)
+                            height = get_resize_height(thumbnail.resolution)
+                            canvas.blank(width, height)
 
-                with Image(filename=book_cover_filepath) as img:
-                    # Use the first image in this set to determine the width and height to scale the
-                    # other images in this set
-                    if width == 0 or height == 0:
-                        width = get_resize_width(thumbnail.resolution, img.width, img.height)
-                        height = get_resize_height(thumbnail.resolution)
-                        canvas.blank(width, height)
+                        dimensions = get_best_fit(width, height, img.width, img.height)
 
-                    dimensions = get_best_fit(width, height, img.width, img.height)
+                        # resize and crop the image
+                        img.resize(width=int(dimensions['width']), height=int(dimensions['height']), filter='lanczos')
+                        img.crop(width=int(width / 2.0), height=int(height / 2.0), gravity='center')
 
-                    # resize and crop the image
-                    img.resize(width=int(dimensions['width']), height=int(dimensions['height']), filter='lanczos')
-                    img.crop(width=int(width / 2.0), height=int(height / 2.0), gravity='center')
-
-                    # add the image to the canvas
-                    canvas.composite(img, left, top)
+                        # add the image to the canvas
+                        canvas.composite(img, left, top)
 
                 # set the coordinates for the next iteration
                 if left == 0 and top == 0:

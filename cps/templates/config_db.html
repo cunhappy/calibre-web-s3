@@ -61,6 +61,34 @@
         {% endif %}
       {% endif %}
     {% endif %}
+    {% if feature_support['s3'] %}
+    <div class="form-group required">
+        <input type="checkbox" id="config_use_s3" name="config_use_s3" data-control="s3_settings" {% if config.config_use_s3 %}checked{% endif %} >
+        <label for="config_use_s3">{{_('Use S3 (Tigris) Storage?')}}</label>
+    </div>
+    <div data-related="s3_settings">
+        <div class="form-group required">
+            <label for="config_s3_endpoint">{{_('S3 Endpoint')}}</label>
+            <input type="text" class="form-control" id="config_s3_endpoint" name="config_s3_endpoint" value="{% if config.config_s3_endpoint != None %}{{ config.config_s3_endpoint }}{% endif %}" autocomplete="off">
+        </div>
+        <div class="form-group required">
+            <label for="config_s3_region">{{_('S3 Region')}}</label>
+            <input type="text" class="form-control" id="config_s3_region" name="config_s3_region" value="{% if config.config_s3_region != None %}{{ config.config_s3_region }}{% endif %}" autocomplete="off">
+        </div>
+        <div class="form-group required">
+            <label for="config_s3_bucket">{{_('S3 Bucket')}}</label>
+            <input type="text" class="form-control" id="config_s3_bucket" name="config_s3_bucket" value="{% if config.config_s3_bucket != None %}{{ config.config_s3_bucket }}{% endif %}" autocomplete="off">
+        </div>
+        <div class="form-group required">
+            <label for="config_s3_access_key">{{_('S3 Access Key')}}</label>
+            <input type="text" class="form-control" id="config_s3_access_key" name="config_s3_access_key" value="{% if config.config_s3_access_key != None %}{{ config.config_s3_access_key }}{% endif %}" autocomplete="off">
+        </div>
+        <div class="form-group required">
+            <label for="config_s3_secret_key">{{_('S3 Secret Key')}}</label>
+            <input type="password" class="form-control" id="config_s3_secret_key" name="config_s3_secret_key_e" value="{% if config.config_s3_secret_key_e != None %}{{ config.config_s3_secret_key_e }}{% endif %}" autocomplete="off">
+        </div>
+    </div>
+    {% endif %}
     <div class="col-sm-12">
       <button id="db_submit" type="submit" class="btn btn-default">{{_('Save')}}</button>
       <a href="{{ url_for('admin.admin') }}" id="config_back" class="btn btn-default">{{_('Cancel')}}</a>

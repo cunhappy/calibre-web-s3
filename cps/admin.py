@@ -50,6 +50,7 @@ from .helper import check_valid_domain, send_test_mail, reset_password, generate
     valid_email, check_username
 from .embed_helper import get_calibre_binarypath
 from .gdriveutils import is_gdrive_ready, gdrive_support
+from .s3utils import s3_support
 from .render_template import render_title_template, get_sidebar_config
 from .services.worker import WorkerThread
 from .usermanagement import user_login_required
@@ -66,7 +67,8 @@ feature_support = {
     'updater': constants.UPDATER_AVAILABLE,
     'gmail': bool(services.gmail),
     'scheduler': schedule.use_APScheduler,
-    'gdrive': gdrive_support
+    'gdrive': gdrive_support,
+    's3': s3_support
 }
 
 try:
@@ -1726,11 +1728,15 @@ def _db_configuration_update_helper():
         ub.session.rollback()
         log.error_or_exception("Settings Database error: {}".format(e))
         _db_configuration_result(_("Oops! Database Error: %(error)s.", error=e.orig), gdrive_error)
+    from . import s3utils
     try:
         metadata_db = os.path.join(to_save['config_calibre_dir'], "metadata.db")
         if config.config_use_google_drive and is_gdrive_ready() and not os.path.exists(metadata_db):
             gdriveutils.downloadFile(None, "metadata.db", metadata_db)
             db_change = True
+        elif config.config_use_s3 and not os.path.exists(metadata_db):
+            if s3utils.download_file("metadata.db", metadata_db):
+                db_change = True
     except Exception as ex:
         return _db_configuration_result('{}'.format(ex), gdrive_error)
     config.config_calibre_split = to_save.get('config_calibre_split', 0) == "on"
@@ -1740,6 +1746,15 @@ def _db_configuration_update_helper():
             return _db_configuration_result(_("Books path not valid"), gdrive_error)
         else:
             _config_string(to_save, "config_calibre_split_dir")
+
+    # S3 configuration
+    _config_checkbox(to_save, "config_use_s3")
+    _config_string(to_save, "config_s3_endpoint")
+    _config_string(to_save, "config_s3_region")
+    _config_string(to_save, "config_s3_bucket")
+    _config_string(to_save, "config_s3_access_key")
+    _config_string(to_save, "config_s3_secret_key_e")
+
     if (db_change or not db_valid or not config.db_configured
            or config.config_calibre_dir != to_save["config_calibre_dir"]):
         if not os.path.exists(metadata_db) or not to_save['config_calibre_dir']:

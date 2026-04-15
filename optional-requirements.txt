@@ -45,3 +45,6 @@ comicapi>=2.2.0,<3.3.0
 
 # Kobo integration
 jsonschema>=3.2.0,<4.30.0
+
+# S3 Integration
+boto3>=1.26.0,<1.37.0

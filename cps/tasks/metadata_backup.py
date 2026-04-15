@@ -105,6 +105,14 @@ class TaskBackupMetadata(CalibreTask):
                                                                 encoding='utf-8',
                                                                 pretty_print=True).decode('utf-8'),
                                                  True)
+        elif config.config_use_s3:
+            from cps import s3utils
+            s3_path = os.path.join(book.path, 'metadata.opf').replace("\\", "/")
+            s3utils.upload_file(etree.tostring(package,
+                                                xml_declaration=True,
+                                                encoding='utf-8',
+                                                pretty_print=True),
+                                s3_path)
         else:
             # ToDo: Handle book folder not found or not readable
             book_metadata_filepath = os.path.join(config.get_book_path(), book.path, 'metadata.opf')
