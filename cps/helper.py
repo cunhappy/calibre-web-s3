@@ -30,7 +30,7 @@ import requests
 import unidecode
 from uuid import uuid4
 
-from flask import send_from_directory, make_response, abort, url_for, Response, request
+from flask import send_from_directory, make_response, abort, url_for, Response, request, redirect
 from flask_babel import gettext as _
 from flask_babel import lazy_gettext as N_
 from flask_babel import get_locale
@@ -696,6 +696,8 @@ def update_dir_structure(book_id,
                          db_filename=None):
     if config.config_use_google_drive:
         return update_dir_structure_gdrive(book_id, first_author)
+    elif config.config_use_s3:
+        return update_dir_structure_s3(book_id, first_author)
     else:
         return update_dir_structure_file(book_id,
                                          calibre_path,
@@ -704,12 +706,53 @@ def update_dir_structure(book_id,
                                          db_filename)
 
 
+def update_dir_structure_s3(book_id, first_author):
+    from . import s3utils
+    book = calibre_db.get_book(book_id)
+
+    author_parts = book.path.split('/')
+    if len(author_parts) < 2:
+        return False
+    authordir = author_parts[0]
+    titledir = author_parts[1]
+    
+    new_authordir = get_valid_filename(first_author or authordir, chars=96)
+    new_titledir = get_valid_filename(book.title, chars=96) + " (" + str(book_id) + ")"
+
+    if titledir != new_titledir or authordir != new_authordir:
+        old_path = book.path
+        new_path = new_authordir + '/' + new_titledir
+        s3utils.move_folder(old_path, new_path)
+        book.path = new_path
+        
+        all_new_name = get_valid_filename(book.title, chars=42) + ' - ' \
+                       + get_valid_filename(first_author or authordir, chars=42)
+        
+        for file_format in book.data:
+            old_name = file_format.name + '.' + file_format.format.lower()
+            new_name = all_new_name + '.' + file_format.format.lower()
+            if old_name != new_name:
+                s3utils.move_object(new_path + '/' + old_name, new_path + '/' + new_name)
+                file_format.name = all_new_name
+                
+    return False
+
+
 def delete_book(book, calibrepath, book_format):
     if not book_format:
         clear_cover_thumbnail_cache(book.id)  # here it breaks
         calibre_db.delete_dirty_metadata(book.id)
     if config.config_use_google_drive:
         return delete_book_gdrive(book, book_format)
+    elif config.config_use_s3:
+        from . import s3utils
+        if book_format:
+            for data in book.data:
+                if data.format.lower() == book_format.lower():
+                    s3utils.delete_object(book.path + '/' + data.name + '.' + book_format.lower())
+        else:
+            s3utils.delete_folder(book.path)
+        return True, None
     else:
         return delete_book_file(book, calibrepath, book_format)
 
@@ -756,6 +799,19 @@ def get_book_cover_internal(book, resolution=None):
                     return Response(cover_file, mimetype='image/jpeg')
                 else:
                     log.error('{}/cover.jpg not found on Google Drive'.format(book.path))
+                    return get_cover_on_failure()
+            except Exception as ex:
+                log.error_or_exception(ex)
+                return get_cover_on_failure()
+        elif config.config_use_s3:
+            from . import s3utils
+            try:
+                s3_path = os.path.join(book.path, "cover.jpg").replace('\\', '/')
+                presigned_url = s3utils.generate_presigned_url(s3_path)
+                if presigned_url:
+                    return redirect(presigned_url)
+                else:
+                    log.error('{}/cover.jpg not found on S3'.format(book.path))
                     return get_cover_on_failure()
             except Exception as ex:
                 log.error_or_exception(ex)
@@ -911,6 +967,18 @@ def save_cover(img, book_path):
             return True, None
         else:
             return False, message
+    elif config.config_use_s3:
+        from . import s3utils
+        tmp_dir = get_temp_dir()
+        ret, message = save_cover_from_filestorage(tmp_dir, "uploaded_cover.jpg", img)
+        if ret is True:
+            s3_path = os.path.join(book_path, 'cover.jpg').replace("\\", "/")
+            with open(os.path.join(tmp_dir, "uploaded_cover.jpg"), 'rb') as f:
+                s3utils.upload_file(f, s3_path)
+            log.info("Cover is saved on S3")
+            return True, None
+        else:
+            return False, message
     else:
         return save_cover_from_filestorage(os.path.join(config.get_book_path(), book_path), "cover.jpg", img)
 
@@ -939,6 +1007,33 @@ def do_download_file(book, book_format, client, data, headers):
                 return gd.do_gdrive_download(df, headers)
         else:
             abort(404)
+    elif config.config_use_s3:
+        from . import s3utils
+        s3_path = os.path.join(book.path, book_name + "." + book_format).replace('\\', '/')
+        if config.config_embed_metadata and (
+                (book_format == "kepub" and config.config_kepubifypath) or
+                (book_format != "kepub" and config.config_binariesdir)):
+            output_path = os.path.join(config.config_calibre_dir, book.path)
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            output = os.path.join(config.config_calibre_dir, book.path, book_name + "." + book_format)
+            if s3utils.download_file(s3_path, output):
+                if book_format == "kepub" and config.config_kepubifypath:
+                    filename, download_name = do_kepubify_metadata_replace(book, output)
+                elif book_format != "kepub" and config.config_binariesdir:
+                    filename, download_name = do_calibre_export(book.id, book_format)
+            else:
+                abort(404)
+        else:
+            file_name = book.title
+            if len(book.authors) > 0:
+                file_name = file_name + ' - ' + book.authors[0].name
+            file_name = get_valid_filename(file_name, replace_whitespace=False, force_unidecode=True)
+            presigned_url = s3utils.generate_presigned_url(s3_path, filename=file_name + "." + book_format)
+            if presigned_url:
+                return redirect(presigned_url)
+            else:
+                abort(404)
     else:
         filename = os.path.join(config.get_book_path(), book.path)
         if not os.path.isfile(os.path.join(filename, book_name + "." + book_format)):

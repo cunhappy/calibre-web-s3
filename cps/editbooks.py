@@ -135,6 +135,19 @@ def upload():
                     for file_format in db_book.data:
                         file_format.name = (helper.get_valid_filename(title, chars=42) + ' - '
                                             + helper.get_valid_filename(input_authors[0], chars=42))
+                elif config.config_use_s3:
+                    from . import s3utils
+                    file_name = (helper.get_valid_filename(title, chars=42) + ' - '
+                                 + helper.get_valid_filename(input_authors[0], chars=42))
+                    s3_path = os.path.join(helper.get_valid_filename(input_authors[0], chars=96),
+                                           title_dir + " (" + str(book_id) + ")",
+                                           file_name + meta.extension.lower()).replace('\\', '/')
+                    db_book.path = os.path.join(helper.get_valid_filename(input_authors[0], chars=96),
+                                               title_dir + " (" + str(book_id) + ")").replace('\\', '/')
+                    with open(meta.file_path, 'rb') as f:
+                        s3utils.upload_file(f, s3_path)
+                    for file_format in db_book.data:
+                        file_format.name = file_name
                 else:
                     error = helper.update_dir_structure(book_id,
                                                         config.get_book_path(),
@@ -149,6 +162,8 @@ def upload():
 
                 if config.config_use_google_drive:
                     gdriveutils.updateGdriveCalibreFromLocal()
+                elif config.config_use_s3:
+                    s3utils.sync_metadata_db()
                 if error:
                     flash(error, category="error")
                 link = '<a href="{}">{}</a>'.format(url_for('web.show_book', book_id=book_id), escape(title))
@@ -431,6 +446,11 @@ def edit_book_param(param, vals, multi=False):
             book.last_modified = datetime.now(timezone.utc)
 
             calibre_db.session.commit()
+            if config.config_use_google_drive:
+                gdriveutils.updateGdriveCalibreFromLocal()
+            elif config.config_use_s3:
+                from . import s3utils
+                s3utils.sync_metadata_db()
             # revert change for sort if automatic fields link is deactivated
             if param == 'title' and vals.get('checkT') == False:
                 book.sort = sort_param

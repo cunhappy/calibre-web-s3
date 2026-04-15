@@ -92,7 +92,7 @@ def add_security_headers(resp):
     default_src = ([host.strip() for host in config.config_trustedhosts.split(',') if host] +
                    ["'self'", "'unsafe-inline'", "'unsafe-eval'"])
     csp = "default-src " + ' '.join(default_src)
-    if request.endpoint == "web.read_book" and config.config_use_google_drive:
+    if request.endpoint == "web.read_book" and (config.config_use_google_drive or config.config_use_s3):
         csp +=" blob: "
     csp += "; font-src 'self' data:"
     if request.endpoint == "web.read_book":
@@ -101,6 +101,8 @@ def add_security_headers(resp):
     if request.path.startswith("/author/") and config.config_use_goodreads:
         csp += " images.gr-assets.com i.gr-assets.com s.gr-assets.com"
     csp += " data:"
+    if config.config_use_s3 and config.config_s3_endpoint:
+        csp += " " + config.config_s3_endpoint
     if request.endpoint == "edit-book.show_edit_book" or config.config_use_google_drive:
         csp += " *"
     if request.endpoint == "web.read_book":

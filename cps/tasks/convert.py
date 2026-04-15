@@ -63,47 +63,74 @@ class TaskConvert(CalibreTask):
         df_cover = None
         cur_book = None
         self.worker_thread = worker_thread
-        if config.config_use_google_drive:
+        if config.config_use_google_drive or config.config_use_s3:
             with app.app_context():
                 worker_db = db.CalibreDB(app)
                 cur_book = worker_db.get_book(self.book_id)
                 self.title = cur_book.title
                 data = worker_db.get_book_format(self.book_id, self.settings['old_book_format'])
-                df = gdriveutils.getFileFromEbooksFolder(cur_book.path,
-                                                         data.name + "." + self.settings['old_book_format'].lower())
-                df_cover = gdriveutils.getFileFromEbooksFolder(cur_book.path, "cover.jpg")
-                if df:
+                
+                if config.config_use_google_drive:
+                    df = gdriveutils.getFileFromEbooksFolder(cur_book.path,
+                                                             data.name + "." + self.settings['old_book_format'].lower())
+                    df_cover = gdriveutils.getFileFromEbooksFolder(cur_book.path, "cover.jpg")
+                else:
+                    from cps import s3utils
+                    s3_path = os.path.join(cur_book.path, data.name + "." + self.settings['old_book_format'].lower()).replace('\\', '/')
+                    s3_cover_path = os.path.join(cur_book.path, "cover.jpg").replace('\\', '/')
+                
+                if (config.config_use_google_drive and df) or config.config_use_s3:
                     datafile_cover = None
                     datafile = os.path.join(config.get_book_path(),
                                             cur_book.path,
                                             data.name + "." + self.settings['old_book_format'].lower())
-                    if df_cover:
+                    if (config.config_use_google_drive and df_cover) or config.config_use_s3:
                         datafile_cover = os.path.join(config.get_book_path(),
                                                       cur_book.path, "cover.jpg")
                     if not os.path.exists(os.path.join(config.get_book_path(), cur_book.path)):
                         os.makedirs(os.path.join(config.get_book_path(), cur_book.path))
-                    df.GetContentFile(datafile)
-                    if df_cover:
-                        df_cover.GetContentFile(datafile_cover)
-                    # worker_db.session.close()
+                    
+                    if config.config_use_google_drive:
+                        df.GetContentFile(datafile)
+                        if df_cover:
+                            df_cover.GetContentFile(datafile_cover)
+                    else:
+                        s3utils.download_file(s3_path, datafile)
+                        s3utils.download_file(s3_cover_path, datafile_cover)
                 else:
                     # ToDo Include cover in error handling
-                    error_message = _("%(format)s not found on Google Drive: %(fn)s",
+                    error_message = _("%(format)s not found: %(fn)s",
                                       format=self.settings['old_book_format'],
                                       fn=data.name + "." + self.settings['old_book_format'].lower())
-                    # worker_db.session.close()
                     return self._handleError(error_message)
 
         filename = self._convert_ebook_format()
-        if config.config_use_google_drive:
-            os.remove(self.file_path + '.' + self.settings['old_book_format'].lower())
-            if df_cover:
+        if config.config_use_google_drive or config.config_use_s3:
+            try:
+                os.remove(self.file_path + '.' + self.settings['old_book_format'].lower())
                 os.remove(os.path.join(config.config_calibre_dir, cur_book.path, "cover.jpg"))
+            except Exception:
+                pass
 
         if filename:
             if config.config_use_google_drive:
                 # Upload files to gdrive
                 gdriveutils.updateGdriveCalibreFromLocal()
+                self._handleSuccess()
+            elif config.config_use_s3:
+                from cps import s3utils
+                s3utils.sync_metadata_db()
+                # Also need to upload the converted file and cover
+                # update_dir_structure_s3 should have handled it if we called it, 
+                # but here we just added a new format.
+                cur_book = db.CalibreDB(app).get_book(self.book_id)
+                new_format = self.settings['new_book_format'].lower()
+                data = db.CalibreDB(app).get_book_format(self.book_id, self.settings['new_book_format'])
+                file_name = data.name + "." + new_format
+                local_file_path = os.path.join(config.get_book_path(), cur_book.path, file_name)
+                s3_path = os.path.join(cur_book.path, file_name).replace('\\', '/')
+                with open(local_file_path, 'rb') as f:
+                    s3utils.upload_file(f, s3_path)
                 self._handleSuccess()
             if self.ereader_mail:
                 # if we're sending to E-Reader after converting, create a one-off task and run it immediately
