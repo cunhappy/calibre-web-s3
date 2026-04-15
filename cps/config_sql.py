@@ -19,6 +19,7 @@
 import os
 import sys
 import json
+import re
 
 from sqlalchemy import Column, String, Integer, SmallInteger, Boolean, BLOB, JSON
 from sqlalchemy.exc import OperationalError
@@ -355,6 +356,25 @@ class ConfigSQL(object):
                         setattr(self, k, "")
                 else:
                     setattr(self, k, v)
+
+        # Environment Variable Overrides
+        if os.environ.get('S3_USE'):
+            self.config_use_s3 = os.environ.get('S3_USE').lower() in ('true', '1', 'yes')
+        if os.environ.get('S3_ENDPOINT'):
+            self.config_s3_endpoint = os.environ.get('S3_ENDPOINT')
+        if os.environ.get('S3_REGION'):
+            self.config_s3_region = os.environ.get('S3_REGION')
+        if os.environ.get('S3_BUCKET'):
+            self.config_s3_bucket = os.environ.get('S3_BUCKET')
+        if os.environ.get('S3_ACCESS_KEY'):
+            self.config_s3_access_key = os.environ.get('S3_ACCESS_KEY')
+        if os.environ.get('S3_SECRET_KEY'):
+            self.config_s3_secret_key_e = os.environ.get('S3_SECRET_KEY')
+        if os.environ.get('CALIBRE_DBPATH'):
+            # Strip metadata.db from the end if present
+            self.config_calibre_dir = re.sub(r'metadata\.db$', '', os.environ.get('CALIBRE_DBPATH')).rstrip(os.sep)
+
+
 
         have_metadata_db = bool(self.config_calibre_dir)
         if have_metadata_db:
