@@ -136,6 +136,11 @@ def create_app():
     config_sql.load_configuration(ub.session, encrypt_key)
     config.init_config(ub.session, encrypt_key, cli_param)
 
+    if config.config_use_s3:
+        from . import s3utils
+        if s3utils.download_metadata_db():
+            config.load()
+
     if error:
         log.error(error)
 

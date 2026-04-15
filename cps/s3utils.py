@@ -19,6 +19,9 @@ def get_s3_client():
     if not s3_support or not config.config_use_s3:
         return None
     
+    log.debug("Initializing S3 client with endpoint: %s, region: %s", 
+              config.config_s3_endpoint, config.config_s3_region)
+    
     s3_config = Config(
         region_name=config.config_s3_region or 'us-east-1',
         signature_version='s3v4',
@@ -37,11 +40,15 @@ def upload_file(file_obj, s3_path):
     if not client:
         return False
     
+    log.info("Uploading %s to S3 bucket %s as %s", 
+             file_obj if isinstance(file_obj, str) else "file object", 
+             config.config_s3_bucket, s3_path)
     try:
         if isinstance(file_obj, str):
             client.upload_file(file_obj, config.config_s3_bucket, s3_path)
         else:
             client.upload_fileobj(file_obj, config.config_s3_bucket, s3_path)
+        log.debug("S3 Upload successful: %s", s3_path)
         return True
     except ClientError as e:
         log.error(f"S3 Upload Error: {e}")
@@ -52,12 +59,31 @@ def download_file(s3_path, local_path):
     if not client:
         return False
     
+    log.info("Downloading %s from S3 bucket %s to %s", 
+             s3_path, config.config_s3_bucket, local_path)
     try:
         client.download_file(config.config_s3_bucket, s3_path, local_path)
+        log.debug("S3 Download successful: %s", local_path)
         return True
     except ClientError as e:
         log.error(f"S3 Download Error: {e}")
         return False
+
+def download_metadata_db():
+    if not config.config_use_s3:
+        return False
+    
+    if not os.path.exists(config.config_calibre_dir):
+        try:
+            os.makedirs(config.config_calibre_dir)
+            log.info("Created Calibre directory: %s", config.config_calibre_dir)
+        except OSError as e:
+            log.error("Failed to create Calibre directory %s: %s", config.config_calibre_dir, e)
+            return False
+
+    metadata_db_path = os.path.join(config.config_calibre_dir, "metadata.db")
+    log.info("Attempting to download metadata.db from S3 to %s", metadata_db_path)
+    return download_file("metadata.db", metadata_db_path)
 
 def generate_presigned_url(s3_path, expiration=3600, filename=None):
     client = get_s3_client()
