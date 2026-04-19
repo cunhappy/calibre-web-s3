@@ -143,7 +143,7 @@ def download_app_db(settings_path):
     return download_file("app.db", settings_path)
 
 def sync_app_db(settings_path):
-    if not config.config_use_s3:
+    if not hasattr(config, 'config_use_s3') or not config.config_use_s3:
         return False
     if os.path.exists(settings_path):
         upload_file(settings_path, "app.db")
@@ -184,16 +184,60 @@ def get_file_stream(s3_path):
         log.error(f"S3 Stream Error: {e}")
         return None
 
-def stream_s3_file(s3_path, headers):
-    stream = get_file_stream(s3_path)
-    if not stream:
+def stream_s3_file(s3_path, range_header):
+    client = get_s3_client()
+    if not client:
         return None
     
-    def generate():
-        for chunk in stream.iter_chunks(chunk_size=4096):
-            yield chunk
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
+    
+    try:
+        head = client.head_object(Bucket=bucket, Key=s3_path)
+        file_size = head['ContentLength']
+        content_type = head.get('ContentType', 'application/octet-stream')
+        
+        start = 0
+        end = file_size - 1
+        status_code = 200
+        
+        if range_header:
+            match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            if match:
+                start_match = match.group(1)
+                end_match = match.group(2)
+                if start_match:
+                    start = int(start_match)
+                if end_match:
+                    end = min(int(end_match), file_size - 1)
+                status_code = 206
+        
+        if status_code == 206:
+            resp = client.get_object(Bucket=bucket, Key=s3_path, Range=f'bytes={start}-{end}')
+            content_length = resp['ContentLength']
+        else:
+            resp = client.get_object(Bucket=bucket, Key=s3_path)
+            content_length = file_size
+
+        def generate():
+            for chunk in resp['Body'].iter_chunks(chunk_size=4096):
+                yield chunk
+        
+        headers = {
+            'Content-Type': content_type,
+            'Accept-Ranges': 'bytes',
+        }
+        
+        if status_code == 206:
+            headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            headers['Content-Length'] = str(content_length)
+        else:
+            headers['Content-Length'] = str(file_size)
             
-    return Response(stream_with_context(generate()), headers=headers)
+        return Response(stream_with_context(generate()), status=status_code, headers=headers)
+
+    except ClientError as e:
+        log.error(f"S3 Stream Error: {e}")
+        return None
 
 def list_objects(prefix):
     client = get_s3_client()
@@ -268,6 +312,8 @@ def delete_folder(prefix):
     return True
 
 def sync_metadata_db():
+    if not hasattr(config, 'config_use_s3') or not config.config_use_s3:
+        return False
     calibre_dir = os.environ.get('CALIBRE_DBPATH') or (config.config_calibre_dir if hasattr(config, 'config_calibre_dir') else None)
     if not calibre_dir:
         return False
