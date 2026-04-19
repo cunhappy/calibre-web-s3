@@ -1216,6 +1216,56 @@ def serve_book(book_id, book_format, anyname):
         except AttributeError as ex:
             log.error_or_exception(ex)
             return "File Not Found"
+    elif config.config_use_s3:
+        from . import s3utils
+        s3_path = os.path.join(book.path, data.name + "." + book_format).replace('\\', '/')
+        if config.config_embed_metadata and (
+                (book_format == "kepub" and config.config_kepubifypath) or
+                (book_format != "kepub" and config.config_binariesdir)):
+            output_path = os.path.join(config.config_calibre_dir, book.path)
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            output = os.path.join(config.config_calibre_dir, book.path, data.name + "." + book_format)
+            if s3utils.download_file(s3_path, output):
+                if book_format == "kepub" and config.config_kepubifypath:
+                    from .helper import do_kepubify_metadata_replace
+                    filename, download_name = do_kepubify_metadata_replace(book, output)
+                elif book_format != "kepub" and config.config_binariesdir:
+                    from .embed_helper import do_calibre_export
+                    filename, download_name = do_calibre_export(book.id, book_format)
+                else:
+                    filename = output_path
+                    download_name = data.name
+
+                response = make_response(send_from_directory(filename, download_name + "." + book_format))
+                if not range_header:
+                    response.headers['Accept-Ranges'] = 'bytes'
+                return response
+            else:
+                return "File Not Found"
+        else:
+            if book_format.upper() == 'TXT':
+                stream = s3utils.get_file_stream(s3_path)
+                if stream:
+                    rawdata = stream.read()
+                    result = chardet.detect(rawdata)
+                    try:
+                        text_data = rawdata.decode(result['encoding']).encode('utf-8')
+                    except UnicodeDecodeError as e:
+                        log.error("Encoding error in text file {}: {}".format(book.id, e))
+                        if "surrogate" in e.reason:
+                            text_data = rawdata.decode(result['encoding'], 'surrogatepass').encode('utf-8', 'surrogatepass')
+                        else:
+                            text_data = rawdata.decode(result['encoding'], 'ignore').encode('utf-8', 'ignore')
+                    return make_response(text_data)
+                else:
+                    return "File Not Found"
+
+            presigned_url = s3utils.generate_presigned_url(s3_path)
+            if presigned_url:
+                return redirect(presigned_url)
+            else:
+                return "File Not Found"
     else:
         if book_format.upper() == 'TXT':
             try:
