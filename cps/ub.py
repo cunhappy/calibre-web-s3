@@ -690,6 +690,13 @@ def init_db(app_db_path):
     global app_DB_path
 
     app_DB_path = app_db_path
+    db_dir = os.path.dirname(app_db_path)
+    if db_dir and not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir)
+        except OSError as e:
+            print(f"Error creating directory {db_dir}: {e}")
+
     engine = create_engine('sqlite:///{0}'.format(app_db_path), echo=False)
 
     Session = scoped_session(sessionmaker())
@@ -762,6 +769,13 @@ def session_commit(success=None, _session=None):
         s.commit()
         if success:
             log.info(success)
+        try:
+            from . import config, cli_param
+            if config and config.config_use_s3:
+                from . import s3utils
+                s3utils.sync_app_db(cli_param.settings_path)
+        except Exception as e:
+            log.error("Failed to sync app.db to S3: %s", e)
     except (exc.OperationalError, exc.InvalidRequestError) as e:
         s.rollback()
         log.error_or_exception(e)

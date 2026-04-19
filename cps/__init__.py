@@ -129,6 +129,9 @@ def create_app():
 
     cli_param.init()
 
+    from . import s3utils
+    s3utils.download_app_db(cli_param.settings_path)
+
     ub.init_db(cli_param.settings_path)
     # pylint: disable=no-member
     encrypt_key, error = config_sql.get_encryption_key(os.path.dirname(cli_param.settings_path))
