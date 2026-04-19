@@ -122,7 +122,54 @@ class ScriptNameSessionInterface(SecureCookieSessionInterface):
         return app.wsgi_app.script_name.rstrip("/") or "/"
 
 
+def pre_startup_s3_sync():
+    print("[S3 Startup] Checking for S3 configuration...", flush=True)
+    if os.environ.get('S3_USE', '').lower() not in ('true', '1', 'yes'):
+        return
+
+    access_key = os.environ.get('S3_ACCESS_KEY')
+    secret_key = os.environ.get('S3_SECRET_KEY')
+    bucket = os.environ.get('S3_BUCKET')
+    region = os.environ.get('S3_REGION', 'us-east-1')
+    endpoint = os.environ.get('S3_ENDPOINT')
+
+    if not all([access_key, secret_key, bucket]):
+        print("[S3 Startup] S3 configuration incomplete. Missing S3_ACCESS_KEY, S3_SECRET_KEY, or S3_BUCKET.", flush=True)
+        return
+
+    try:
+        os.makedirs('/tmp/calibre', exist_ok=True)
+        print("[S3 Startup] Created directory /tmp/calibre", flush=True)
+    except Exception as e:
+        print(f"[S3 Startup] Failed to create /tmp/calibre: {e}", flush=True)
+        return
+
+    print(f"[S3 Startup] Downloading metadata.db from bucket {bucket}...", flush=True)
+    try:
+        import boto3
+        from botocore.config import Config
+        # pylint: disable=no-name-in-module
+        from botocore.exceptions import ClientError
+        
+        s3_config = Config(
+            region_name=region,
+            signature_version='s3v4',
+        )
+        s3 = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=s3_config
+        )
+        s3.download_file(bucket, 'metadata.db', '/tmp/calibre/metadata.db')
+        print("[S3 Startup] Successfully downloaded metadata.db to /tmp/calibre/metadata.db", flush=True)
+    except Exception as e:
+        print(f"[S3 Startup] Failed to download metadata.db: {e}", flush=True)
+
+
 def create_app():
+    pre_startup_s3_sync()
     cli_param.init()
 
     # Create directory for database if it doesn't exist
