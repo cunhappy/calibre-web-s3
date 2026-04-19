@@ -418,6 +418,12 @@ class ConfigSQL(object):
         self._session.merge(s)
         try:
             self._session.commit()
+            if self.config_use_s3:
+                try:
+                    from . import s3utils
+                    s3utils.sync_app_db(self.cli.settings_path)
+                except Exception as e:
+                    log.error("Failed to sync app.db to S3: %s", e)
         except OperationalError as e:
             log.error('Database error: %s', e)
             self._session.rollback()
