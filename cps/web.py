@@ -1261,9 +1261,9 @@ def serve_book(book_id, book_format, anyname):
                 else:
                     return "File Not Found"
 
-            presigned_url = s3utils.generate_presigned_url(s3_path)
-            if presigned_url:
-                return redirect(presigned_url)
+            response = s3utils.stream_s3_file(s3_path, range_header)
+            if response:
+                return response
             else:
                 return "File Not Found"
     else:

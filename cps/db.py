@@ -27,7 +27,7 @@ import unidecode
 from uuid import uuid4
 
 from sqlite3 import OperationalError as sqliteOperationalError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy import Table, Column, ForeignKey, CheckConstraint
 from sqlalchemy import String, Integer, Boolean, TIMESTAMP, Float
 from sqlalchemy.orm import relationship, sessionmaker, scoped_session, selectinload
@@ -713,9 +713,17 @@ class CalibreDB:
                 log.error_or_exception(e)
                 return None
 
-        return scoped_session(sessionmaker(autocommit=False,
+        session_factory = sessionmaker(autocommit=False,
                                            autoflush=False,
-                                           bind=engine, future=True))
+                                           bind=engine, future=True)
+
+        @event.listens_for(session_factory, "after_commit")
+        def receive_after_commit(session):
+            if cls.config.config_use_s3:
+                from . import s3utils
+                s3utils.sync_metadata_db()
+
+        return scoped_session(session_factory)
 
 
     def get_book(self, book_id):

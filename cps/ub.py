@@ -679,8 +679,15 @@ def init_db_thread():
     global app_DB_path
     engine = create_engine('sqlite:///{0}'.format(app_DB_path), echo=False)
 
-    Session = scoped_session(sessionmaker())
-    Session.configure(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+
+    @event.listens_for(session_factory, "after_commit")
+    def sync_app_db_after_commit(session_obj):
+        from . import config, s3utils
+        if getattr(config, 'config_use_s3', False):
+            s3utils.sync_app_db(app_DB_path)
+
+    Session = scoped_session(session_factory)
     return Session()
 
 
@@ -699,8 +706,15 @@ def init_db(app_db_path):
 
     engine = create_engine('sqlite:///{0}'.format(app_db_path), echo=False)
 
-    Session = scoped_session(sessionmaker())
-    Session.configure(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+
+    @event.listens_for(session_factory, "after_commit")
+    def sync_app_db_after_commit(session_obj):
+        from . import config, s3utils
+        if getattr(config, 'config_use_s3', False):
+            s3utils.sync_app_db(app_DB_path)
+
+    Session = scoped_session(session_factory)
     session = Session()
 
     if os.path.exists(app_db_path):
@@ -739,8 +753,15 @@ def password_change(user_credentials=None):
 
 def get_new_session_instance():
     new_engine = create_engine('sqlite:///{0}'.format(app_DB_path), echo=False)
-    new_session = scoped_session(sessionmaker())
-    new_session.configure(bind=new_engine)
+    session_factory = sessionmaker(bind=new_engine)
+
+    @event.listens_for(session_factory, "after_commit")
+    def sync_app_db_after_commit(session_obj):
+        from . import config, s3utils
+        if getattr(config, 'config_use_s3', False):
+            s3utils.sync_app_db(app_DB_path)
+
+    new_session = scoped_session(session_factory)
 
     atexit.register(lambda: new_session.remove() if new_session else True)
 
