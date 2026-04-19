@@ -388,6 +388,11 @@ class ConfigSQL(object):
         if have_metadata_db:
             db_file = os.path.join(self.config_calibre_dir, 'metadata.db')
             have_metadata_db = os.path.isfile(db_file)
+
+        # If using S3, we assume the DB will be available (either already here or will be downloaded)
+        if not have_metadata_db and self.config_use_s3 and self.config_calibre_dir:
+            have_metadata_db = True
+
         self.db_configured = have_metadata_db
         
         from . import cli_param
