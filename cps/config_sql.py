@@ -342,20 +342,28 @@ class ConfigSQL(object):
     def load(self):
         """Load all configuration values from the underlying storage."""
         s = self._read_from_storage()  # type: _Settings
-        for k, v in s.__dict__.items():
-            if k[0] != '_':
-                if v is None:
-                    # if the storage column has no value, apply the (possible) default
-                    column = s.__class__.__dict__.get(k)
-                    if column.default is not None:
-                        v = column.default.arg
-                if k.endswith("_e") and v is not None:
-                    try:
-                        setattr(self, k, self._fernet.decrypt(v).decode())
-                    except cryptography.fernet.InvalidToken:
-                        setattr(self, k, "")
-                else:
-                    setattr(self, k, v)
+        if s:
+            for k, v in s.__dict__.items():
+                if k[0] != '_':
+                    if v is None:
+                        # if the storage column has no value, apply the (possible) default
+                        column = s.__class__.__dict__.get(k)
+                        if column.default is not None:
+                            v = column.default.arg
+                    if k.endswith("_e") and v is not None:
+                        try:
+                            setattr(self, k, self._fernet.decrypt(v).decode())
+                        except cryptography.fernet.InvalidToken:
+                            setattr(self, k, "")
+                    else:
+                        setattr(self, k, v)
+        else:
+            # Handle case where database is not yet initialized or table is empty
+            # We still want to set default values from the _Settings class if possible
+            for k, v in _Settings.__dict__.items():
+                if k[0] != '_' and hasattr(v, 'default') and v.default is not None:
+                    if hasattr(v.default, 'arg'):
+                        setattr(self, k, v.default.arg)
 
         # Environment Variable Overrides
         if os.environ.get('S3_USE'):
@@ -434,7 +442,6 @@ class ConfigSQL(object):
             log.error(error)
         log.warning("invalidating configuration")
         self.db_configured = False
-        self.save()
 
     def get_book_path(self):
         return self.config_calibre_split_dir if self.config_calibre_split else self.config_calibre_dir
