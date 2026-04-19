@@ -11,10 +11,14 @@ except ImportError:
 from flask import stream_with_context, Response
 import os
 import re
+import threading
 
 from . import logger, config
 
 log = logger.create()
+
+_metadata_sync_lock = threading.Lock()
+_app_db_sync_lock = threading.Lock()
 
 def get_s3_client():
     if not s3_support:
@@ -146,7 +150,8 @@ def sync_app_db(settings_path):
     if not hasattr(config, 'config_use_s3') or not config.config_use_s3:
         return False
     if os.path.exists(settings_path):
-        upload_file(settings_path, "app.db")
+        with _app_db_sync_lock:
+            upload_file(settings_path, "app.db")
         return True
     return False
 
@@ -194,33 +199,60 @@ def stream_s3_file(s3_path, range_header):
     try:
         head = client.head_object(Bucket=bucket, Key=s3_path)
         file_size = head['ContentLength']
-        content_type = head.get('ContentType', 'application/octet-stream')
         
-        start = 0
-        end = file_size - 1
+        # Determine content type
+        content_type = head.get('ContentType')
+        if not content_type or content_type == 'application/octet-stream':
+            import mimetypes
+            content_type, _ = mimetypes.guess_type(s3_path)
+            if not content_type:
+                content_type = 'application/octet-stream'
+        
+        start = None
+        end = None
         status_code = 200
+        content_length = file_size
         
         if range_header:
-            match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            match = re.search(r'bytes=(\d*)-(\d*)', range_header)
             if match:
-                start_match = match.group(1)
-                end_match = match.group(2)
-                if start_match:
-                    start = int(start_match)
-                if end_match:
-                    end = min(int(end_match), file_size - 1)
-                status_code = 206
+                start_str = match.group(1)
+                end_str = match.group(2)
+                
+                if start_str and end_str:
+                    start = int(start_str)
+                    end = int(end_str)
+                    content_length = end - start + 1
+                elif start_str:
+                    start = int(start_str)
+                    end = file_size - 1
+                    content_length = file_size - start
+                elif end_str:
+                    # last n bytes
+                    length = int(end_str)
+                    start = max(0, file_size - length)
+                    end = file_size - 1
+                    content_length = file_size - start
+                
+                if start is not None:
+                    status_code = 206
         
         if status_code == 206:
+            # Ensure end is not beyond file size
+            end = min(end, file_size - 1)
             resp = client.get_object(Bucket=bucket, Key=s3_path, Range=f'bytes={start}-{end}')
+            # Update content_length from response as it might be different if we messed up
             content_length = resp['ContentLength']
         else:
             resp = client.get_object(Bucket=bucket, Key=s3_path)
             content_length = file_size
 
         def generate():
-            for chunk in resp['Body'].iter_chunks(chunk_size=4096):
-                yield chunk
+            try:
+                for chunk in resp['Body'].iter_chunks(chunk_size=4096):
+                    yield chunk
+            finally:
+                resp['Body'].close()
         
         headers = {
             'Content-Type': content_type,
@@ -320,6 +352,7 @@ def sync_metadata_db():
     calibre_dir = re.sub(r'metadata\.db$', '', calibre_dir).rstrip(os.sep)
     metadata_db_path = os.path.join(calibre_dir, "metadata.db")
     if os.path.exists(metadata_db_path):
-        upload_file(metadata_db_path, "metadata.db")
+        with _metadata_sync_lock:
+            upload_file(metadata_db_path, "metadata.db")
         return True
     return False
