@@ -368,6 +368,10 @@ class ConfigSQL(object):
         # Environment Variable Overrides
         if os.environ.get('S3_USE'):
             self.config_use_s3 = os.environ.get('S3_USE').lower() in ('true', '1', 'yes')
+
+        if self.config_use_s3 and not self.config_calibre_dir:
+            if os.path.exists('/tmp/calibre/metadata.db'):
+                self.config_calibre_dir = '/tmp/calibre'
         if os.environ.get('S3_ENDPOINT'):
             self.config_s3_endpoint = os.environ.get('S3_ENDPOINT')
         if os.environ.get('S3_REGION'):
