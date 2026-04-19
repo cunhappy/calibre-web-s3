@@ -120,6 +120,7 @@ def download_metadata_db():
             return False
 
     metadata_db_path = os.path.join(calibre_dir, "metadata.db")
+    print(f"Attempting to download metadata.db from S3 to {metadata_db_path}", flush=True)
     log.info("Attempting to download metadata.db from S3 to %s", metadata_db_path)
     return download_file("metadata.db", metadata_db_path)
 
@@ -128,6 +129,7 @@ def download_app_db(settings_path):
     if not os.environ.get('S3_USE', '').lower() in ('true', '1', 'yes'):
         return False
     
+    print(f"Attempting to download app.db from S3 to {settings_path}", flush=True)
     log.info("Attempting to download app.db from S3 to %s", settings_path)
     # We need to ensure the directory exists
     settings_dir = os.path.dirname(settings_path)

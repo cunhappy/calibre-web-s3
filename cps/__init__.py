@@ -129,6 +129,11 @@ def create_app():
 
     cli_param.init()
 
+    # Create directory for database if it doesn't exist
+    settings_dir = os.path.dirname(os.path.abspath(cli_param.settings_path))
+    if not os.path.exists(settings_dir):
+        os.makedirs(settings_dir)
+
     from . import s3utils
     s3utils.download_app_db(cli_param.settings_path)
 
