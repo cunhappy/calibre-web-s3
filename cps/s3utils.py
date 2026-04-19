@@ -17,46 +17,40 @@ from . import logger, config
 log = logger.create()
 
 def get_s3_client():
-    if not s3_support or not config.config_use_s3:
-        # If config is not yet initialized, check environment variables
-        if not os.environ.get('S3_USE', '').lower() in ('true', '1', 'yes'):
-            return None
-        
-        # Use env vars if available
-        endpoint = os.environ.get('S3_ENDPOINT')
-        region = os.environ.get('S3_REGION') or 'us-east-1'
-        access_key = os.environ.get('S3_ACCESS_KEY')
-        secret_key = os.environ.get('S3_SECRET_KEY')
-        bucket = os.environ.get('S3_BUCKET')
-        
-        if not all([access_key, secret_key, bucket]):
-            return None
-            
-        s3_config = Config(
-            region_name=region,
-            signature_version='s3v4',
-        )
-        return boto3.client(
-            's3',
-            endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            config=s3_config
-        )
-
-    log.debug("Initializing S3 client with endpoint: %s, region: %s", 
-              config.config_s3_endpoint, config.config_s3_region)
+    if not s3_support:
+        return None
     
+    # Check environment variable first as it might be called before config is loaded
+    use_s3 = os.environ.get('S3_USE', '').lower() in ('true', '1', 'yes')
+    
+    # If not in env, check config object if it's initialized
+    if not use_s3:
+        if hasattr(config, 'config_use_s3') and config.config_use_s3:
+            use_s3 = True
+    
+    if not use_s3:
+        return None
+
+    # Use env vars if available, fallback to config
+    endpoint = os.environ.get('S3_ENDPOINT') or (config.config_s3_endpoint if hasattr(config, 'config_s3_endpoint') else None)
+    region = os.environ.get('S3_REGION') or (config.config_s3_region if hasattr(config, 'config_s3_region') else 'us-east-1')
+    access_key = os.environ.get('S3_ACCESS_KEY') or (config.config_s3_access_key if hasattr(config, 'config_s3_access_key') else None)
+    secret_key = os.environ.get('S3_SECRET_KEY') or (config.config_s3_secret_key_e if hasattr(config, 'config_s3_secret_key_e') else None)
+    
+    if not all([access_key, secret_key]):
+        print("S3 client init failed: Missing credentials", flush=True)
+        return None
+        
+    print(f"Initializing S3 client with endpoint: {endpoint}, region: {region}", flush=True)
     s3_config = Config(
-        region_name=config.config_s3_region or 'us-east-1',
+        region_name=region,
         signature_version='s3v4',
     )
-    
     return boto3.client(
         's3',
-        endpoint_url=config.config_s3_endpoint,
-        aws_access_key_id=config.config_s3_access_key,
-        aws_secret_access_key=config.config_s3_secret_key_e,
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
         config=s3_config
     )
 
@@ -65,8 +59,9 @@ def upload_file(file_obj, s3_path):
     if not client:
         return False
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     
+    print(f"S3 Upload starting: {s3_path} to bucket {bucket}", flush=True)
     log.info("Uploading %s to S3 bucket %s as %s", 
              file_obj if isinstance(file_obj, str) else "file object", 
              bucket, s3_path)
@@ -75,9 +70,11 @@ def upload_file(file_obj, s3_path):
             client.upload_file(file_obj, bucket, s3_path)
         else:
             client.upload_fileobj(file_obj, bucket, s3_path)
+        print(f"S3 Upload success: {s3_path}", flush=True)
         log.debug("S3 Upload successful: %s", s3_path)
         return True
     except ClientError as e:
+        print(f"S3 Upload failed: {e}", flush=True)
         log.error(f"S3 Upload Error: {e}")
         return False
 
@@ -86,25 +83,28 @@ def download_file(s3_path, local_path):
     if not client:
         return False
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     
+    print(f"S3 Download starting: {s3_path} from bucket {bucket} to {local_path}", flush=True)
     log.info("Downloading %s from S3 bucket %s to %s", 
              s3_path, bucket, local_path)
     try:
         client.download_file(bucket, s3_path, local_path)
+        print(f"S3 Download success: {local_path}", flush=True)
         log.debug("S3 Download successful: %s", local_path)
         return True
     except ClientError as e:
+        print(f"S3 Download failed: {e}", flush=True)
         log.error(f"S3 Download Error: {e}")
         return False
 
 def download_metadata_db():
-    if not config.config_use_s3:
-        # Try to check environment variables if config is not yet initialized
-        if not os.environ.get('S3_USE', '').lower() in ('true', '1', 'yes'):
+    use_s3 = os.environ.get('S3_USE', '').lower() in ('true', '1', 'yes')
+    if not use_s3:
+        if not hasattr(config, 'config_use_s3') or not config.config_use_s3:
             return False
     
-    calibre_dir = (config.config_calibre_dir if hasattr(config, 'config_calibre_dir') else None) or os.environ.get('CALIBRE_DBPATH')
+    calibre_dir = os.environ.get('CALIBRE_DBPATH') or (config.config_calibre_dir if hasattr(config, 'config_calibre_dir') else None)
     if not calibre_dir:
         return False
     
@@ -155,7 +155,7 @@ def generate_presigned_url(s3_path, expiration=3600, filename=None):
     if not client:
         return None
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     params = {'Bucket': bucket, 'Key': s3_path}
     if filename:
         params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
@@ -176,7 +176,7 @@ def get_file_stream(s3_path):
     if not client:
         return None
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     try:
         obj = client.get_object(Bucket=bucket, Key=s3_path)
         return obj['Body']
@@ -200,7 +200,7 @@ def list_objects(prefix):
     if not client:
         return []
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     try:
         paginator = client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
@@ -220,7 +220,7 @@ def move_object(old_key, new_key):
     if not client:
         return False
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     try:
         client.copy_object(
             Bucket=bucket,
@@ -250,7 +250,7 @@ def delete_object(key):
     if not client:
         return False
     
-    bucket = config.config_s3_bucket if hasattr(config, 'config_s3_bucket') and config.config_s3_bucket else os.environ.get('S3_BUCKET')
+    bucket = os.environ.get('S3_BUCKET') or (config.config_s3_bucket if hasattr(config, 'config_s3_bucket') else None)
     try:
         client.delete_object(Bucket=bucket, Key=key)
         return True
@@ -268,7 +268,7 @@ def delete_folder(prefix):
     return True
 
 def sync_metadata_db():
-    calibre_dir = (config.config_calibre_dir if hasattr(config, 'config_calibre_dir') else None) or os.environ.get('CALIBRE_DBPATH')
+    calibre_dir = os.environ.get('CALIBRE_DBPATH') or (config.config_calibre_dir if hasattr(config, 'config_calibre_dir') else None)
     if not calibre_dir:
         return False
     calibre_dir = re.sub(r'metadata\.db$', '', calibre_dir).rstrip(os.sep)
